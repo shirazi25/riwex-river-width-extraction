@@ -35,7 +35,7 @@ CONFIG = {
     "latitude": -3.312,
     "longitude": -60.598,
     "output_path": os.path.join(HERE, "results_landsat"),
-    "water_indices": ["ndwi","ndmw","awei_sh","awei_nsh","andwi"],
+    "water_indices": ["ndwi", "ndmi", "awei_sh", "awei_nsh", "andwi"],
     "reach_type": ["single_reach"],
     "segment_snic": 'Y', # 'Y'/'N'
     "lambda_values": [0.01,0.1,1,5,10],

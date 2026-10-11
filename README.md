@@ -1,19 +1,16 @@
 # RiWEx — River Width Extraction
 
-RiWEx is a Python workflow for estimating river width from satellite and remote-sensing products. It includes separate workflows for:
+RiWEx is a Python workflow I developed to estimate river width from satellite and remote-sensing data. The repository contains separate workflows for:
 
 - Landsat 8/9 imagery
 - Sentinel-2 imagery
 - MODIS-derived Global WaterPack data
 
-The workflows locate the nearest river reach in the SWORD dataset, prepare a reach buffer, perform water segmentation, and save maps and river-width products for one user-supplied location.
+Starting from a latitude and longitude, RiWEx finds the nearest river reach in the SWORD dataset, builds a working buffer around it, separates water from land, and derives a river-width time series. The three scripts follow the same general idea, but each one is adapted to the spatial resolution and data structure of its sensor.
 
-## Important notes
+## Before running the code
 
-- RiWEx is intended for research and educational use. Validate its outputs before using them for scientific or operational decisions.
-- You need your own Google Earth Engine account and an Earth Engine-enabled Google Cloud project.
-- No Earth Engine project ID, password, access token, or service-account key is included in this repository.
-- A CSV input file is not required. Define one site directly in the script or pass its coordinates on the command line.
+RiWEx is a research workflow, so the results should always be checked against the original imagery and any available reference observations. To run the workflows, you will need a Google Earth Engine account and an Earth Engine-enabled Google Cloud project.
 
 ## Requirements
 
@@ -70,7 +67,7 @@ You can also leave the files unchanged and pass the location as command-line arg
 
 ## Supply your Earth Engine project ID
 
-Choose one of these methods. Do not put passwords, tokens, or downloaded service-account keys in the repository.
+The scripts read the Earth Engine project ID from a command-line option or from the `GOOGLE_CLOUD_PROJECT` environment variable.
 
 Pass the ID for a single run:
 
@@ -110,7 +107,63 @@ python RiWEx_Sentinel2.py \
   --project-id YOUR_PROJECT_ID
 ```
 
-Landsat and Sentinel-2 also accept processing parameters such as `--indices` and `--lambdas`. Run a script with `--help` to see its current options.
+Landsat and Sentinel-2 also accept `--indices` and `--lambdas`. Run a script with `--help` to see the available command-line options.
+
+## Water indices
+
+The Landsat and Sentinel-2 workflows can calculate five water-related spectral indices. In the equations below, `B`, `G`, `R`, `NIR`, `SWIR1`, and `SWIR2` refer to the blue, green, red, near-infrared, and two shortwave-infrared bands.
+
+| Option | Equation used in RiWEx | Why it is useful |
+| --- | --- | --- |
+| `ndwi` | `(G - NIR) / (G + NIR)` | A common first choice for open-water detection. Water generally has a stronger green response and a weaker NIR response than vegetation and soil. |
+| `ndmi` | `(NIR - SWIR1) / (NIR + SWIR1)` | Responds to surface and vegetation moisture. It can provide useful additional information where wet land and water boundaries are difficult to separate. |
+| `awei_nsh` | `4 × (G - SWIR1) - (0.25 × NIR + 2.75 × SWIR2)` | The Automated Water Extraction Index for areas where terrain shadow is not the main problem. |
+| `awei_sh` | `B + 2.5 × G - 1.5 × (NIR + SWIR1) - 0.25 × SWIR2` | The shadow-oriented AWEI form. It is useful where dark surfaces or terrain shadows may otherwise be confused with water. |
+| `andwi` | `(B + G + R - NIR - SWIR1 - SWIR2) / (B + G + R + NIR + SWIR1 + SWIR2)` | Uses all six optical bands to increase the contrast between visible reflectance and infrared reflectance. |
+
+The corresponding band mappings are handled inside each script. For Landsat 8/9, RiWEx uses bands `SR_B2` to `SR_B7`; for Sentinel-2 it uses `B2`, `B3`, `B4`, `B8`, `B11`, and `B12`.
+
+More than one index can be tested in the same Landsat or Sentinel-2 run. For example:
+
+```bash
+python RiWEx_Sentinel2.py \
+  --site "Amazon Manacapuru" \
+  --latitude -3.312 \
+  --longitude -60.598 \
+  --indices ndwi awei_sh andwi \
+  --project-id YOUR_PROJECT_ID
+```
+
+There is no single index that is best for every river. The result depends on water colour, sediment, vegetation, shadows, cloud contamination, and sensor resolution. Comparing several indices is often more informative than selecting one in advance.
+
+## Lambda and the energy terms
+
+After the spectral index is normalized, RiWEx separates river pixels from land pixels with a graph-cut/max-flow segmentation. The segmentation balances two parts:
+
+- **Data energy (`e_data`)** describes how well each pixel fits the water or land class according to its normalized value.
+- **Smoothness energy (`e_smooth`)** penalizes abrupt label changes between neighbouring pixels, especially when their values are similar.
+
+The reported `flow` is the total minimum-cut energy returned by the max-flow solution. For the Landsat and Sentinel-2 workflows, these values are saved for each date, index, and lambda value in the generated energy CSV files. They are diagnostic values: they help compare parameter settings, but the lowest number should not automatically be treated as the best river map without visually checking the segmentation.
+
+Lambda controls the strength of the smoothness term. A small lambda allows the segmentation to follow local pixel differences more closely, which can preserve narrow features but may also produce a noisy or fragmented river mask. A larger lambda favours a smoother and more connected result, but it may remove narrow channels or merge nearby features. The neighbour weight used by the Landsat and Sentinel-2 scripts is:
+
+```text
+weight = lambda × exp(-|pixel_1 - pixel_2| / sigma)
+```
+
+The MODIS workflow uses the same principle with a Gaussian form based on the squared pixel difference. Its current downstream segmentation uses `lambda = 1`. Landsat tests `0.01`, `0.1`, `1`, `5`, and `10` by default, while Sentinel-2 starts with `0.01`. You can test your own values, for example:
+
+```bash
+python RiWEx_Landsat.py \
+  --site "Amazon Manacapuru" \
+  --latitude -3.312 \
+  --longitude -60.598 \
+  --indices ndwi awei_sh \
+  --lambdas 0.01 0.1 1 5 10 \
+  --project-id YOUR_PROJECT_ID
+```
+
+RiWEx also introduces temporal information before segmentation. With `energy_method = "basic"`, the normalized index image is multiplied directly by the temporal water-occurrence map. The alternative method first transforms the temporal map with a logistic function controlled by `energy_alpha` and `energy_beta`. Here, alpha controls the steepness of the transition and beta sets its midpoint. This temporal step gives more support to pixels that have behaved like water in the reference time series.
 
 ## Outputs
 
