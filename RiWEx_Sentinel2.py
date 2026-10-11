@@ -21,6 +21,7 @@ import warnings
 import urllib.request
 import argparse
 import gc
+from datetime import datetime
 
 import ee
 import geemap
@@ -47,6 +48,8 @@ CONFIG = {
     "site": "example_site",
     "latitude": -3.312,
     "longitude": -60.598,
+    "start_date": "2023-01-01",
+    "end_date": "2024-01-01",
     "output_path": os.path.join(HERE, "results_sentinel2"),
 
     "water_indices": ["ndwi"],
@@ -74,6 +77,17 @@ def log_time(start_time, section_name):
     elapsed = time.time() - start_time
     print(f"Section '{section_name}' took {elapsed:.2f} seconds")
     return time.time()
+
+
+def validate_date_range():
+    """Validate the ISO study dates; end_date is exclusive."""
+    try:
+        start = datetime.fromisoformat(CONFIG["start_date"])
+        end = datetime.fromisoformat(CONFIG["end_date"])
+    except ValueError as exc:
+        raise ValueError("Dates must use YYYY-MM-DD format.") from exc
+    if start >= end:
+        raise ValueError("start_date must be earlier than end_date.")
 
 def initialize_earth_engine():
     if not CONFIG["project_id"]:
@@ -167,7 +181,9 @@ def calculate_reach_length(feature, reach_type, reaches):
     return length.getInfo(), start_time
 
 # ----------------- MAPS -----------------
-def _ee_s2_rgb(reach_buffer, start="2020-01-01", end="2023-12-31"):
+def _ee_s2_rgb(reach_buffer, start=None, end=None):
+    start = start or CONFIG["start_date"]
+    end = end or CONFIG["end_date"]
     s2 = (ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
           .filterBounds(reach_buffer).filterDate(start, end)
           .sort("CLOUDY_PIXEL_PERCENTAGE").first()
@@ -187,7 +203,7 @@ def save_map_visualization(site, lon, lat, reach_buffer, reach_geometry, save_pa
 
         satellite = (ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
                      .filterBounds(reach_buffer)
-                     .filterDate("2020-01-01", "2023-12-31")
+                     .filterDate(CONFIG["start_date"], CONFIG["end_date"])
                      .sort("CLOUDY_PIXEL_PERCENTAGE")
                      .first()
                      .select(["B4", "B3", "B2"])
@@ -339,6 +355,7 @@ def process_sentinel_data(reach_buffer, topo_condition):
         sentinel = (ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED").select("B.*")
                     .linkCollection(ee.ImageCollection("COPERNICUS/S2_CLOUD_PROBABILITY"), "probability")
                     .filterBounds(reach_buffer)
+                    .filterDate(CONFIG["start_date"], CONFIG["end_date"])
                     .sort("system:time_start"))
 
         results_by_index = {}
@@ -375,7 +392,8 @@ def process_sentinel_data(reach_buffer, topo_condition):
 def process_jrc_monthly(reach_buffer):
     start_time = time.time()
     sentinel = (ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED").select("B4")
-                .filterBounds(reach_buffer))
+                .filterBounds(reach_buffer)
+                .filterDate(CONFIG["start_date"], CONFIG["end_date"]))
     sen_mean = sentinel.mean()
     jrc_img = ee.ImageCollection("JRC/GSW1_4/MonthlyRecurrence").select(['monthly_recurrence'], ['occ'])
     jrc_sen = jrc_img.map(lambda img: img.addBands(sen_mean).copyProperties(img, img.propertyNames()))
@@ -940,14 +958,15 @@ def calculate_river_width(results_by_index_lambda, river_length, site, site_save
 
 # ----------------- SINGLE-SITE PROCESS -----------------
 def process_site(site, latitude, longitude):
+    validate_date_range()
     os.makedirs(CONFIG["output_path"], exist_ok=True)
     reaches = ee.FeatureCollection("projects/sat-io/open-datasets/SWORD/reaches_merged")
     site = str(site)
     lon, lat = float(longitude), float(latitude)
     print(f"\nProcessing site: {site} (lat: {lat}, lon: {lon})")
-    site_dir = os.path.join(
-        CONFIG["output_path"], site.replace(" ", "_").replace("/", "_")
-    )
+    site_name = site.replace(" ", "_").replace("/", "_")
+    period_name = f"{CONFIG['start_date']}_to_{CONFIG['end_date']}"
+    site_dir = os.path.join(CONFIG["output_path"], site_name, period_name)
     os.makedirs(site_dir, exist_ok=True)
 
     try:
@@ -999,6 +1018,8 @@ def parse_args():
     p.add_argument("--site", default=CONFIG["site"], help="A label for the site")
     p.add_argument("--latitude", type=float, default=CONFIG["latitude"])
     p.add_argument("--longitude", type=float, default=CONFIG["longitude"])
+    p.add_argument("--start-date", default=CONFIG["start_date"], help="Inclusive date (YYYY-MM-DD)")
+    p.add_argument("--end-date", default=CONFIG["end_date"], help="Exclusive date (YYYY-MM-DD)")
     p.add_argument(
         "--project-id",
         default=CONFIG["project_id"],
@@ -1015,6 +1036,8 @@ def parse_args():
 def main():
     args = parse_args()
     CONFIG["project_id"] = args.project_id
+    CONFIG["start_date"] = args.start_date
+    CONFIG["end_date"] = args.end_date
     CONFIG["water_indices"] = args.indices
     CONFIG["lambda_values"] = args.lambdas
     CONFIG["debug_plots"] = args.debug_plots

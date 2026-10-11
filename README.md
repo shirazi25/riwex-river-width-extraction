@@ -51,19 +51,25 @@ Authenticate Earth Engine once:
 earthengine authenticate
 ```
 
-## Configure a location
+## Configure the location and study period
 
-Each script contains the following public example values near the top:
+Each script contains the following example settings near the top:
 
 ```python
 "site": "example_site",
 "latitude": -3.312,
 "longitude": -60.598,
+"start_date": "2023-01-01",
+"end_date": "2024-01-01",
 ```
 
 Replace them with the name and WGS84 coordinates of the location you want to process. Latitude must be between `-90` and `90`; longitude must be between `-180` and `180`.
 
-You can also leave the files unchanged and pass the location as command-line arguments.
+The default period covers the 2023 calendar year. `start_date` is included and `end_date` is excluded, following the convention used by Google Earth Engine. In other words, `2023-01-01` to `2024-01-01` processes dates from 1 January through 31 December 2023.
+
+Change these values to match the study period, while keeping the `YYYY-MM-DD` format. The selected dates must also fall within the archive of the chosen satellite product. RiWEx stores different study periods in separate output folders so that results from two runs are not mixed.
+
+You can also leave the files unchanged and pass the location and dates as command-line arguments.
 
 ## Supply your Earth Engine project ID
 
@@ -104,6 +110,8 @@ python RiWEx_Sentinel2.py \
   --site "Amazon Manacapuru" \
   --latitude -3.312 \
   --longitude -60.598 \
+  --start-date 2023-01-01 \
+  --end-date 2024-01-01 \
   --project-id YOUR_PROJECT_ID
 ```
 
@@ -173,7 +181,7 @@ Generated files are written to sensor-specific directories beside the scripts:
 - `results_sentinel2/`
 - `results_modis/`
 
-Depending on the workflow and available imagery, outputs can include reach shapefiles, GeoTIFF rasters, NetCDF data, map images, diagnostic tables, and river-width time series. These generated directories are excluded from Git.
+Within these directories, each run is grouped by site and study period. Depending on the workflow and available imagery, outputs can include reach shapefiles, GeoTIFF rasters, NetCDF data, map images, diagnostic tables, and river-width time series. These generated directories are excluded from Git.
 
 ## Repository structure
 

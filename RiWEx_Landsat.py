@@ -21,6 +21,7 @@ import rasterio
 from rasterio import features
 import argparse
 import warnings
+from datetime import datetime
 
 
 warnings.filterwarnings('ignore')
@@ -34,6 +35,8 @@ CONFIG = {
     "site": "example_site",
     "latitude": -3.312,
     "longitude": -60.598,
+    "start_date": "2023-01-01",
+    "end_date": "2024-01-01",
     "output_path": os.path.join(HERE, "results_landsat"),
     "water_indices": ["ndwi", "ndmi", "awei_sh", "awei_nsh", "andwi"],
     "reach_type": ["single_reach"],
@@ -56,6 +59,17 @@ def log_time(start_time, section_name):
     elapsed = time.time() - start_time
     print(f"Section '{section_name}' took {elapsed:.2f} seconds")
     return time.time()
+
+
+def validate_date_range():
+    """Validate the ISO study dates; end_date is exclusive."""
+    try:
+        start = datetime.fromisoformat(CONFIG["start_date"])
+        end = datetime.fromisoformat(CONFIG["end_date"])
+    except ValueError as exc:
+        raise ValueError("Dates must use YYYY-MM-DD format.") from exc
+    if start >= end:
+        raise ValueError("start_date must be earlier than end_date.")
 
 
 def initialize_earth_engine():
@@ -134,7 +148,7 @@ def save_map_visualization(site, lon, lat, reach_buffer, reach_geometry, save_pa
                      .blend(ee.Image().paint(gauge_buffer, 1).visualize(palette=["yellow"])))
         satellite = (ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
                     .filterBounds(reach_buffer)
-                    .filterDate("2020-01-01", "2023-12-31")
+                    .filterDate(CONFIG["start_date"], CONFIG["end_date"])
                     .sort("CLOUD_COVER")
                     .first()
                     .select(["SR_B4", "SR_B3", "SR_B2"])
@@ -291,7 +305,10 @@ def process_landsat_data(reach_buffer, buffer_area, topo_condition):
     try:
         landsat8 = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
         landsat9 = ee.ImageCollection("LANDSAT/LC09/C02/T1_L2")
-        landsat = landsat8.merge(landsat9).filterBounds(reach_buffer).sort("system:time_start")
+        landsat = (landsat8.merge(landsat9)
+                   .filterBounds(reach_buffer)
+                   .filterDate(CONFIG["start_date"], CONFIG["end_date"])
+                   .sort("system:time_start"))
         results_by_index = {}
         for w_index in CONFIG["water_indices"]:
             def map_cloud_mask(img):
@@ -938,6 +955,7 @@ def calculate_river_width(results_by_index_lambda, river_length, site, site_save
 def main(site, latitude, longitude):
     """Process one river location supplied directly by the user."""
     start_time = time.time()
+    validate_date_range()
     os.makedirs(CONFIG["output_path"], exist_ok=True)
     initialize_earth_engine()
     reaches = ee.FeatureCollection("projects/sat-io/open-datasets/SWORD/reaches_merged")
@@ -945,9 +963,9 @@ def main(site, latitude, longitude):
     site = str(site)
     lat, lon = float(latitude), float(longitude)
     print(f"\nProcessing site: {site} (lat: {lat}, lon: {lon})")
-    site_save_path = os.path.join(
-        CONFIG["output_path"], site.replace(" ", "_").replace("/", "_")
-    )
+    site_name = site.replace(" ", "_").replace("/", "_")
+    period_name = f"{CONFIG['start_date']}_to_{CONFIG['end_date']}"
+    site_save_path = os.path.join(CONFIG["output_path"], site_name, period_name)
     os.makedirs(site_save_path, exist_ok=True)
 
     reach, start_time = find_reach(reaches, lon=lon, lat=lat)
@@ -994,6 +1012,8 @@ def parse_args():
     parser.add_argument("--site", default=CONFIG["site"], help="A label for the site")
     parser.add_argument("--latitude", type=float, default=CONFIG["latitude"])
     parser.add_argument("--longitude", type=float, default=CONFIG["longitude"])
+    parser.add_argument("--start-date", default=CONFIG["start_date"], help="Inclusive date (YYYY-MM-DD)")
+    parser.add_argument("--end-date", default=CONFIG["end_date"], help="Exclusive date (YYYY-MM-DD)")
     parser.add_argument(
         "--project-id",
         default=CONFIG["project_id"],
@@ -1016,6 +1036,8 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
     CONFIG["project_id"] = args.project_id
+    CONFIG["start_date"] = args.start_date
+    CONFIG["end_date"] = args.end_date
     CONFIG["water_indices"] = args.indices
     CONFIG["lambda_values"] = args.lambdas
     main(args.site, args.latitude, args.longitude)

@@ -14,7 +14,7 @@ import glob
 import re
 from shapely.geometry import shape as shapely_shape, mapping
 import matplotlib.pyplot as plt
-from datetime import datetime
+from datetime import datetime, timedelta
 from calendar import monthrange
 import stackstac
 from pystac_client import Client
@@ -39,6 +39,8 @@ CONFIG = {
     "site": "example_site",
     "latitude": -3.312,
     "longitude": -60.598,
+    "start_date": "2023-01-01",
+    "end_date": "2024-01-01",
     "output_path": os.path.join(HERE, "results_modis"),
     # Use --project-id or set GOOGLE_CLOUD_PROJECT. Never commit credentials.
     "project_id": os.getenv("GOOGLE_CLOUD_PROJECT"),
@@ -53,6 +55,18 @@ CONFIG = {
 def log_time(start, name):
     print(f"{name} took {time.time() - start:.2f} s")
     return time.time()
+
+
+def validate_date_range():
+    """Validate the ISO study dates; end_date is exclusive."""
+    try:
+        start = datetime.fromisoformat(CONFIG["start_date"])
+        end = datetime.fromisoformat(CONFIG["end_date"])
+    except ValueError as exc:
+        raise ValueError("Dates must use YYYY-MM-DD format.") from exc
+    if start >= end:
+        raise ValueError("start_date must be earlier than end_date.")
+    return start, end
 
 def initialize_earth_engine():
     if not CONFIG["project_id"]:
@@ -136,6 +150,8 @@ def main():
     parser.add_argument("--site", default=CONFIG["site"], help="A label for the site")
     parser.add_argument("--latitude", type=float, default=CONFIG["latitude"])
     parser.add_argument("--longitude", type=float, default=CONFIG["longitude"])
+    parser.add_argument("--start-date", default=CONFIG["start_date"], help="Inclusive date (YYYY-MM-DD)")
+    parser.add_argument("--end-date", default=CONFIG["end_date"], help="Exclusive date (YYYY-MM-DD)")
     parser.add_argument(
         "--project-id",
         default=CONFIG["project_id"],
@@ -144,16 +160,21 @@ def main():
     args = parser.parse_args()
 
     CONFIG["project_id"] = args.project_id
+    CONFIG["start_date"] = args.start_date
+    CONFIG["end_date"] = args.end_date
+    validate_date_range()
     os.makedirs(CONFIG["output_path"], exist_ok=True)
 
     initialize_earth_engine()
     reaches = ee.FeatureCollection("projects/sat-io/open-datasets/SWORD/reaches_merged")
 
     site = str(args.site).replace(" ", "_").replace("/", "_")
+    site = f"{site}_{CONFIG['start_date']}_to_{CONFIG['end_date']}"
     lat, lon = float(args.latitude), float(args.longitude)
     dataset_dir = os.path.join(CONFIG["output_path"], "sites")
     site_dir = os.path.join(dataset_dir, site)
     os.makedirs(site_dir, exist_ok=True)
+    CONFIG["active_site_dir"] = site_dir
 
     print(f"\n📍 Site: {site}  (lat={lat}, lon={lon})")
     reach, _ = find_reach(reaches, lon=lon, lat=lat)
@@ -179,17 +200,18 @@ if __name__ == "__main__":
 
 base_dir = CONFIG["output_path"]
 
-# Process the generated site collection.
-dataset_dirs = [
-    os.path.join(base_dir, d)
-    for d in os.listdir(base_dir)
-    if os.path.isdir(os.path.join(base_dir, d))
-]
+# Process only the site and study period selected for this run.
+dataset_dirs = [os.path.dirname(CONFIG["active_site_dir"])]
 
 # STAC settings
 stac_endpoint = "https://geoservice.dlr.de/eoc/ogc/stac/v1/"
 collections = ["GWP_P1D"]
-dates_from_to = ["2003-01-01", "2022-12-31"]
+analysis_start, analysis_end_exclusive = validate_date_range()
+analysis_end_inclusive = analysis_end_exclusive - timedelta(days=1)
+dates_from_to = [
+    analysis_start.strftime("%Y-%m-%d"),
+    analysis_end_inclusive.strftime("%Y-%m-%d"),
+]
 target_band = "gwpp1d"
 margin = 1
 m = 1
@@ -517,11 +539,7 @@ def binary_segmentation_with_maxflow(
 
 for dataset_dir in dataset_dirs:
 
-    site_dirs = [
-        os.path.join(dataset_dir, s)
-        for s in os.listdir(dataset_dir)
-        if os.path.isdir(os.path.join(dataset_dir, s))
-    ]
+    site_dirs = [CONFIG["active_site_dir"]]
 
     for site_dir in site_dirs:
         station_name = os.path.basename(site_dir)
@@ -551,9 +569,7 @@ for dataset_dir in dataset_dirs:
         # ==================================================
 
         catalog = Client.open(stac_endpoint)
-        sample_daily_file = os.path.join(daily_dir, "2003-01-01_daily_gwpp1d.tif")
-
-        if not os.path.exists(sample_daily_file):
+        if not glob.glob(os.path.join(daily_dir, "*_daily_gwpp1d.tif")):
             try:
                 gdf = gpd.read_file(shapefile_path).to_crs(4326)
                 minx, miny, maxx, maxy = gdf.total_bounds
@@ -637,7 +653,7 @@ for dataset_dir in dataset_dirs:
         # Normalize stacked (full period)
         if not os.path.exists(normalized_tiff):
             normalize_stacked_geotiff(stacked_path, normalized_tiff,
-                                      datetime(2003,1,1), datetime(2022,12,31))
+                                      analysis_start, analysis_end_inclusive)
 
         # Full water occurrence
         calculate_water_occurrence(normalized_tiff, data_monthly_root)
@@ -658,8 +674,8 @@ for dataset_dir in dataset_dirs:
                 stacked_geotiff_file=stacked_path,
                 normalized_geotiff_file=norm_file,
                 month=mo,
-                start_year=2003,
-                end_year=2022
+                start_year=analysis_start.year,
+                end_year=analysis_end_inclusive.year
             )
 
             unfilled = os.path.join(occ_folder,
@@ -698,8 +714,7 @@ for dataset_dir in dataset_dirs:
         monthly_occ = load_monthly_occurrence(monthly_output_folder, reach_id)
         normalized_monthly_data = load_normalized_monthly_data(normalized_tiff)
 
-        sample_temporal = os.path.join(output_dir, "2003-01-01_daily_gwpp1d_temporal.tif")
-        if not os.path.exists(sample_temporal):
+        if not glob.glob(os.path.join(output_dir, "*_daily_gwpp1d_temporal.tif")):
             process_daily_maps(daily_dir, monthly_occ, normalized_monthly_data, output_dir)
 
         # ==================================================
