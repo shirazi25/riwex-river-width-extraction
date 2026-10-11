@@ -1,0 +1,35 @@
+name: riwex_landsat
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - numpy
+  - pandas
+  - xarray
+  - rasterio
+  - rioxarray
+  - geopandas
+  - shapely
+  - pyproj
+  - fiona
+  - matplotlib
+  - scikit-image
+  - scikit-learn
+  - tqdm
+  - requests
+  - attrs
+  - opencv
+  - netcdf4
+  - scipy
+  - pip:
+      - earthengine-api
+      - geemap
+      - geopy
+      - folium
+      - contextily
+      - mercantile
+      - pyogrio
+      - xee
+      - PyMaxflow

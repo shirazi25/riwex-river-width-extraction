@@ -1,0 +1,34 @@
+name: riwex_modis
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - numpy
+  - pandas
+  - geopandas
+  - shapely
+  - rasterio
+  - rioxarray
+  - fiona
+  - pyproj
+  - folium
+  - geopy
+  - matplotlib
+  - scikit-image
+  - scipy
+  - xarray
+  - simplekml
+  - openpyxl
+  - ipywidgets
+  - requests
+  - tqdm
+  - jupyterlab
+  - gdal
+  - pip
+  - pip:
+      - pystac-client
+      - stackstac
+      - geemap
+      - earthengine-api
+      - PyMaxflow

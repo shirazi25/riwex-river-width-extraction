@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environments and local configuration
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+
+# Credentials and private keys
+*.pem
+*.key
+*.p12
+*.pfx
+*service-account*.json
+credentials.json
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# RiWEx generated outputs
+results_landsat/
+results_sentinel2/
+results_modis/
+*.tif
+*.tiff
+*.nc
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+*.gpkg
+*.kml
+*.kmz
+*.xlsx
+
+# Temporary files
+*.tmp
+*.temp
+*.memmap

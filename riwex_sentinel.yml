@@ -1,0 +1,26 @@
+name: riwex_sentinel
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - numpy
+  - pandas
+  - xarray
+  - netcdf4
+  - earthengine-api
+  - geemap
+  - geopandas
+  - shapely
+  - pyproj
+  - rtree
+  - gdal
+  - fiona
+  - rasterio
+  - rioxarray
+  - matplotlib
+  - scipy
+  - pymaxflow
+  - opencv
+  - pip:
+      - xee
