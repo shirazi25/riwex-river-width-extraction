@@ -711,7 +711,7 @@ for dataset_dir in dataset_dirs:
             continue
 
         daily_temp_files = sorted(glob.glob(os.path.join(output_dir, "*_temporal.tif")))
-        lambda_values = [1]
+        lambda_values = [1.0]
         area_by_lambda = {lam: [] for lam in lambda_values}
 
         for tf in daily_temp_files:

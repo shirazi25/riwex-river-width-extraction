@@ -52,7 +52,7 @@ CONFIG = {
     "water_indices": ["ndwi"],
     "reach_type": ["single_reach"],
     "segment_snic": "Y",
-    "lambda_values": [0.01],
+    "lambda_values": [1.0],
 
     "buffer_coef": 1,
     "energy_method": "basic",
@@ -401,7 +401,7 @@ def add_temporal_dependency(target_map, temporal_map, method, alpha=CONFIG["ener
     return combined_map
 
 def binary_segmentation_with_maxflow(
-    normalized_image, foreground_seeds=None, background_seeds=None, lambda_param=CONFIG["lambda_values"],
+    normalized_image, foreground_seeds=None, background_seeds=None, lambda_param=1.0,
     site=None, w_index=None, time_index=None, time_coord=None
 ):
     # Keep logic same; just ensure float32 arrays to reduce memory
@@ -1007,7 +1007,7 @@ def parse_args():
     p.add_argument("--indices", nargs="+", default=CONFIG["water_indices"],
                    help="Water indices to run: ndwi ndmi awei_nsh awei_sh andwi")
     p.add_argument("--lambdas", nargs="+", type=float, default=CONFIG["lambda_values"],
-                   help="Lambda values. Example: --lambdas 0.01 0.1 1")
+                   help="Lambda values. Default: 1. Example: --lambdas 0.1 1 5")
     p.add_argument("--debug-plots", action="store_true",
                    help="Save diagnostic plots. Off by default for faster runs.")
     return p.parse_args()

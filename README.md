@@ -151,7 +151,7 @@ Lambda controls the strength of the smoothness term. A small lambda allows the s
 weight = lambda × exp(-|pixel_1 - pixel_2| / sigma)
 ```
 
-The MODIS workflow uses the same principle with a Gaussian form based on the squared pixel difference. Its current downstream segmentation uses `lambda = 1`. Landsat tests `0.01`, `0.1`, `1`, `5`, and `10` by default, while Sentinel-2 starts with `0.01`. You can test your own values, for example:
+The MODIS workflow uses the same principle with a Gaussian form based on the squared pixel difference. All three workflows use `lambda = 1` by default. Landsat and Sentinel-2 can also test several values in one run, for example:
 
 ```bash
 python RiWEx_Landsat.py \

@@ -38,7 +38,7 @@ CONFIG = {
     "water_indices": ["ndwi", "ndmi", "awei_sh", "awei_nsh", "andwi"],
     "reach_type": ["single_reach"],
     "segment_snic": 'Y', # 'Y'/'N'
-    "lambda_values": [0.01,0.1,1,5,10],
+    "lambda_values": [1.0],
     "buffer_coef": 1,
     "energy_method": "basic",
     "energy_alpha": 1.0,
@@ -335,7 +335,7 @@ def add_temporal_dependency(target_map, temporal_map, method, alpha = CONFIG["en
     return combined_map
 
 def binary_segmentation_with_maxflow(
-    normalized_image, foreground_seeds=None, background_seeds=None, lambda_param=CONFIG["lambda_values"],
+    normalized_image, foreground_seeds=None, background_seeds=None, lambda_param=1.0,
     site=None, w_index=None, time_index=None, time_coord=None
 ):
     """Perform binary segmentation using max-flow algorithm and return energy terms."""
