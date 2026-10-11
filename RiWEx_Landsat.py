@@ -412,6 +412,16 @@ def binary_segmentation_with_maxflow(
     }
     return segmentation, energy_terms
 
+def normalize_spatial_dims(dataset):
+    """Use the lon/lat names expected by the processing code across xee versions."""
+    rename_map = {}
+    if "x" in dataset.dims and "lon" not in dataset.dims:
+        rename_map["x"] = "lon"
+    if "y" in dataset.dims and "lat" not in dataset.dims:
+        rename_map["y"] = "lat"
+    return dataset.rename(rename_map) if rename_map else dataset
+
+
 def process_local_data(landsat_segmentation, jrc_col, reach_buffer, reach_buffer_cor, site, site_save_path):
     """Process local data with normalization and segmentation, saving energy terms in one CSV per index."""
     start_time = time.time()
@@ -426,23 +436,26 @@ def process_local_data(landsat_segmentation, jrc_col, reach_buffer, reach_buffer
                 for lambda_val in CONFIG["lambda_values"]:
                     results_by_index_lambda[w_index][lambda_val] = None
                 continue
-            ds = xr.open_dataset(
-                landsat_data, engine="ee", crs="EPSG:4326", scale=0.0003, geometry=reach_buffer
+            ds = geemap.ee_to_xarray(
+                landsat_data, crs="EPSG:4326", scale=0.0003, geometry=reach_buffer
             )
+            ds = normalize_spatial_dims(ds)
 
             # add single jrc occurrence as a xarray
             ###############################################
 
             jrc_img = ee.Image("JRC/GSW1_4/GlobalSurfaceWater").select("occurrence")
-            jrc_arr = xr.open_dataset(
+            jrc_arr = geemap.ee_to_xarray(
                 jrc_img,
-                engine = 'ee',
                 crs = 'EPSG:4326',
                 scale = 0.0003,
                 geometry = reach_buffer
             )
+            jrc_arr = normalize_spatial_dims(jrc_arr)
 
-            ds_sub = ds.sel(time = slice('2023','2024')).mean(dim ='time')
+            ds_sub = ds.sel(
+                time=slice(CONFIG["start_date"], CONFIG["end_date"])
+            ).mean(dim='time')
             jrc_arr = jrc_arr.interp_like(ds_sub, method = 'nearest').isel(time = 0).drop_vars('time')
 
             fig0, ax0 = plt.subplots(figsize = (5,5))
@@ -457,8 +470,8 @@ def process_local_data(landsat_segmentation, jrc_col, reach_buffer, reach_buffer
             plt.close(fig0)
 
 
-            river_mask_occ  = (jrc_arr.occurrence >= 90).astype(int).values.T
-            non_river_mask_occ = (jrc_arr.occurrence < 10).astype(int).values.T
+            river_mask_occ = (jrc_arr.occurrence >= 90).astype(int).transpose("lat", "lon").values
+            non_river_mask_occ = (jrc_arr.occurrence < 10).astype(int).transpose("lat", "lon").values
 
             fig1, ax1 = plt.subplots(figsize = (5,5))
             plot1 = (jrc_arr.occurrence >= 90).astype(int).plot(
@@ -486,9 +499,11 @@ def process_local_data(landsat_segmentation, jrc_col, reach_buffer, reach_buffer
             time_coords = pd.to_datetime(ds.time.values)
             ds_index = ds[w_index]
             jrc_occ = ee.ImageCollection("JRC/GSW1_4/MonthlyRecurrence").select(['monthly_recurrence'],['occ'])
-            ds_occ = xr.open_dataset(
-               jrc_occ, engine = 'ee', crs = 'EPSG:4326', scale = 0.0003, geometry=reach_buffer
+            ds_occ = geemap.ee_to_xarray(
+               jrc_occ, crs='EPSG:4326', scale=0.0003, geometry=reach_buffer
             )
+            ds_occ = normalize_spatial_dims(ds_occ)
+            ds_occ = ds_occ.interp(lon=ds.lon, lat=ds.lat, method="nearest")
             ds_occ_normal = (ds_occ / 100.0)
             ds_occ_mean = ds_occ_normal.median('time')
             ds_occ_fill = ds_occ_normal.fillna(0)
@@ -509,7 +524,7 @@ def process_local_data(landsat_segmentation, jrc_col, reach_buffer, reach_buffer
             ds_norm_filled2 = xr.where(jrc_arr.occurrence >= 90, 1, ds_norm_filled2)
 
 
-            ds_plot3 = ds_norm_filled2.sel(time='2024')
+            ds_plot3 = ds_norm_filled2.sel(time=slice(CONFIG["start_date"], CONFIG["end_date"]))
             ds_plot3 = ds_plot3.drop_duplicates(dim='time')
 
             fig3 = ds_plot3.plot(
@@ -555,8 +570,9 @@ def process_local_data(landsat_segmentation, jrc_col, reach_buffer, reach_buffer
 
 
             ds_norm_filled2 = xr.where(reach_raster_arr == 1, 1, ds_norm_filled2)
+            ds_norm_filled2 = ds_norm_filled2.transpose("time", "lat", "lon")
 
-            ds_plot5 = ds_norm_filled2.sel(time='2024')
+            ds_plot5 = ds_norm_filled2.sel(time=slice(CONFIG["start_date"], CONFIG["end_date"]))
             ds_plot5 = ds_plot5.drop_duplicates(dim='time')
 
             fig5 = ds_plot5.plot(
@@ -575,7 +591,7 @@ def process_local_data(landsat_segmentation, jrc_col, reach_buffer, reach_buffer
                 seg_result = []
                 td_result = []
                 for t in range(ds_norm_filled2.sizes["time"]):
-                    index_slice = ds_norm_filled2.isel(time=t).values.T
+                    index_slice = ds_norm_filled2.isel(time=t).transpose("lat", "lon").values
                     if index_slice.shape != (ds_norm_filled2.sizes["lat"], ds_norm_filled2.sizes["lon"]):
                         raise ValueError(f"Time slice shape mismatch: {index_slice.shape}")
                     month_index = ds_norm_filled2.isel(time = t).month.values
@@ -587,7 +603,7 @@ def process_local_data(landsat_segmentation, jrc_col, reach_buffer, reach_buffer
                     num_bg = min(20, len(background_seeds))
                     foreground_seeds_sample = random.sample(foreground_seeds, num_fg) if num_fg > 0 else []
                     background_seeds_sample = random.sample(background_seeds, num_bg) if num_bg > 0 else []
-                    occ_slice = ds_occ_fill.isel(time=month_index).occ.values.T
+                    occ_slice = ds_occ_fill.isel(time=month_index).occ.transpose("lat", "lon").values
                     td_map = add_temporal_dependency(index_slice, occ_slice, method = CONFIG['energy_method'])
 
                     td_result.append(td_map)
@@ -623,7 +639,7 @@ def process_local_data(landsat_segmentation, jrc_col, reach_buffer, reach_buffer
                     name=f"segmentation_{w_index}_lambda_{lambda_val}"
                 )
 
-                ds_plot6 = td_arr.sel(time='2024')
+                ds_plot6 = td_arr.sel(time=slice(CONFIG["start_date"], CONFIG["end_date"]))
                 ds_plot6 = ds_plot6.drop_duplicates(dim='time')
 
                 fig6 = ds_plot6.plot(
@@ -636,7 +652,7 @@ def process_local_data(landsat_segmentation, jrc_col, reach_buffer, reach_buffer
                 plt.savefig(f'{site_save_path}/07_temporal_dependency.png', dpi=360, bbox_inches='tight')
                 plt.close(fig6.fig)
 
-                ds_plot7 = results_arr.sel(time='2024')
+                ds_plot7 = results_arr.sel(time=slice(CONFIG["start_date"], CONFIG["end_date"]))
                 ds_plot7 = ds_plot7.drop_duplicates(dim='time')
 
                 fig7 = ds_plot7.plot(
@@ -658,13 +674,13 @@ def process_local_data(landsat_segmentation, jrc_col, reach_buffer, reach_buffer
                 seg_arr.rio.write_coordinate_system(inplace = True)
                 seg_arr_clip = seg_arr.rio.clip(reach_buffer_cor.geometry, reach_buffer_cor.crs)
 
-                ds_jrc = xr.open_dataset(
-                jrc_col,
-                engine = 'ee',
-                crs = 'EPSG:4326',
-                geometry = reach_buffer,
-                scale = 0.0003
+                ds_jrc = geemap.ee_to_xarray(
+                    jrc_col,
+                    crs='EPSG:4326',
+                    geometry=reach_buffer,
+                    scale=0.0003,
                 )
+                ds_jrc = normalize_spatial_dims(ds_jrc)
 
                 jrc_time_coords = pd.to_datetime(ds_jrc.time.values)
 

@@ -531,6 +531,15 @@ def blunder_detection(df, window_size):
 
     return df_clean
 
+def normalize_spatial_dims(dataset):
+    """Use the lon/lat names expected by the processing code across xee versions."""
+    rename_map = {}
+    if "x" in dataset.dims and "lon" not in dataset.dims:
+        rename_map["x"] = "lon"
+    if "y" in dataset.dims and "lat" not in dataset.dims:
+        rename_map["y"] = "lat"
+    return dataset.rename(rename_map) if rename_map else dataset
+
 # ----------------- LOCAL PROCESSING -----------------
 def process_local_data(sentinel_segmentation, jrc_monthly_col, reach_buffer, reach_buffer_cor_gdf, site, site_save_path):
     start_time = time.time()
@@ -549,12 +558,18 @@ def process_local_data(sentinel_segmentation, jrc_monthly_col, reach_buffer, rea
                 continue
 
             # ---- Sentinel segmentation cube (float32 to reduce memory)
-            ds = xr.open_dataset(sentinel_data, engine="ee", crs="EPSG:4326", scale=0.0002, geometry=reach_buffer)
+            ds = geemap.ee_to_xarray(
+                sentinel_data, crs="EPSG:4326", scale=0.0002, geometry=reach_buffer
+            )
+            ds = normalize_spatial_dims(ds)
             ds = ds.astype("float32")
 
             # ---- JRC Global occurrence
             jrc_img = ee.Image("JRC/GSW1_4/GlobalSurfaceWater").select("occurrence")
-            jrc_arr = xr.open_dataset(jrc_img, engine="ee", crs="EPSG:4326", scale=0.0002, geometry=reach_buffer)
+            jrc_arr = geemap.ee_to_xarray(
+                jrc_img, crs="EPSG:4326", scale=0.0002, geometry=reach_buffer
+            )
+            jrc_arr = normalize_spatial_dims(jrc_arr)
             # keep small
             try:
                 jrc_arr["occurrence"] = jrc_arr["occurrence"].astype("float32")
@@ -562,7 +577,9 @@ def process_local_data(sentinel_segmentation, jrc_monthly_col, reach_buffer, rea
                 pass
 
             # For plotting / grid alignment
-            ds_sub = ds.sel(time=slice('2023', '2024')).mean(dim='time')
+            ds_sub = ds.sel(
+                time=slice(CONFIG["start_date"], CONFIG["end_date"])
+            ).mean(dim='time')
             jrc_arr = jrc_arr.interp_like(ds_sub, method='nearest').isel(time=0).drop_vars('time')
 
             # --- save diagnostic 01
@@ -575,8 +592,8 @@ def process_local_data(sentinel_segmentation, jrc_monthly_col, reach_buffer, rea
                 except Exception:
                     _safe_close_all_figures()
 
-            river_mask_occ = (jrc_arr.occurrence >= 90).astype(int).values.T
-            non_river_mask_occ = (jrc_arr.occurrence < 10).astype(int).values.T
+            river_mask_occ = (jrc_arr.occurrence >= 90).astype(int).transpose("lat", "lon").values
+            non_river_mask_occ = (jrc_arr.occurrence < 10).astype(int).transpose("lat", "lon").values
 
             # 02
             if CONFIG.get("debug_plots"):
@@ -599,7 +616,11 @@ def process_local_data(sentinel_segmentation, jrc_monthly_col, reach_buffer, rea
                     _safe_close_all_figures()
 
             # ---- JRC monthly occurrence cube (float32)
-            ds_occ = xr.open_dataset(jrc_monthly_col, engine="ee", crs="EPSG:4326", scale=0.0002, geometry=reach_buffer)
+            ds_occ = geemap.ee_to_xarray(
+                jrc_monthly_col, crs="EPSG:4326", scale=0.0002, geometry=reach_buffer
+            )
+            ds_occ = normalize_spatial_dims(ds_occ)
+            ds_occ = ds_occ.interp(lon=ds.lon, lat=ds.lat, method="nearest")
             ds_occ = ds_occ.astype("float32")
 
             ds_occ_normal = (ds_occ / np.float32(100.0))
@@ -630,7 +651,7 @@ def process_local_data(sentinel_segmentation, jrc_monthly_col, reach_buffer, rea
             # 04
             if CONFIG.get("debug_plots"):
                 try:
-                    fig3 = ds_norm_filled2.sel(time="2024").plot(x="lon", y="lat", col="time", col_wrap=10)
+                    fig3 = ds_norm_filled2.sel(time=slice(CONFIG["start_date"], CONFIG["end_date"])).plot(x="lon", y="lat", col="time", col_wrap=10)
                     plt.savefig(os.path.join(site_save_path, "04_index_norm.png"), dpi=360, bbox_inches="tight")
                     plt.close(fig3.fig)
                 except Exception:
@@ -669,11 +690,12 @@ def process_local_data(sentinel_segmentation, jrc_monthly_col, reach_buffer, rea
 
             # forcing by reach raster
             ds_norm_filled2 = xr.where(reach_raster_arr == 1, np.float32(1.0), ds_norm_filled2)
+            ds_norm_filled2 = ds_norm_filled2.transpose("time", "lat", "lon")
 
             # 06
             if CONFIG.get("debug_plots"):
                 try:
-                    fig5 = ds_norm_filled2.sel(time="2024").plot(x="lon", y="lat", col="time", col_wrap=10)
+                    fig5 = ds_norm_filled2.sel(time=slice(CONFIG["start_date"], CONFIG["end_date"])).plot(x="lon", y="lat", col="time", col_wrap=10)
                     plt.savefig(os.path.join(site_save_path, "06_index_norm_filled_by_reach.png"), dpi=360, bbox_inches="tight")
                     plt.close(fig5.fig)
                 except Exception:
@@ -695,13 +717,19 @@ def process_local_data(sentinel_segmentation, jrc_monthly_col, reach_buffer, rea
             td_base_mm = np.memmap(td_base_mmap_path, dtype=np.float32, mode="w+", shape=(T, ny, nx))
 
             for t in range(T):
-                index_slice = np.asarray(ds_norm_filled2.isel(time=t).data, dtype=np.float32).T
+                index_slice = np.asarray(
+                    ds_norm_filled2.isel(time=t).transpose("lat", "lon").data,
+                    dtype=np.float32,
+                )
 
                 if index_slice.shape != (ny, nx):
                     raise ValueError(f"Time slice shape mismatch: {index_slice.shape}")
 
                 month_index = int(month_indices[t])
-                occ_slice = np.asarray(ds_occ_fill.isel(time=month_index).occ.data, dtype=np.float32).T
+                occ_slice = np.asarray(
+                    ds_occ_fill.isel(time=month_index).occ.transpose("lat", "lon").data,
+                    dtype=np.float32,
+                )
 
                 num_fg = min(20, len(foreground_seeds)) if foreground_seeds else 0
                 num_bg = min(20, len(background_seeds)) if background_seeds else 0
@@ -722,7 +750,7 @@ def process_local_data(sentinel_segmentation, jrc_monthly_col, reach_buffer, rea
                         coords={"time": time_coords, "lat": ds.lat, "lon": ds.lon},
                         name=f"temporal_dependency_{w_index}"
                     )
-                    fig6 = td_preview_arr.sel(time="2024").plot(x="lon", y="lat", col="time", col_wrap=10)
+                    fig6 = td_preview_arr.sel(time=slice(CONFIG["start_date"], CONFIG["end_date"])).plot(x="lon", y="lat", col="time", col_wrap=10)
                     plt.savefig(os.path.join(site_save_path, "07_temporal_dependency.png"), dpi=360, bbox_inches="tight")
                     plt.close(fig6.fig)
                     del td_preview_arr
@@ -764,7 +792,7 @@ def process_local_data(sentinel_segmentation, jrc_monthly_col, reach_buffer, rea
 
                 if CONFIG.get("debug_plots"):
                     try:
-                        fig7 = results_arr.sel(time="2024").plot(x="lon", y="lat", col="time", col_wrap=10)
+                        fig7 = results_arr.sel(time=slice(CONFIG["start_date"], CONFIG["end_date"])).plot(x="lon", y="lat", col="time", col_wrap=10)
                         plt.savefig(os.path.join(site_save_path, "08_maxflow_result.png"), dpi=360, bbox_inches="tight")
                         plt.close(fig7.fig)
                     except Exception:

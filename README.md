@@ -173,6 +173,14 @@ python RiWEx_Landsat.py \
 
 RiWEx also introduces temporal information before segmentation. With `energy_method = "basic"`, the normalized index image is multiplied directly by the temporal water-occurrence map. The alternative method first transforms the temporal map with a logistic function controlled by `energy_alpha` and `energy_beta`. Here, alpha controls the steepness of the transition and beta sets its midpoint. This temporal step gives more support to pixels that have behaved like water in the reference time series.
 
+## Example result
+
+I included one complete Sentinel-2 example for the Amazon River near Manacapuru, Brazil (`-3.312`, `-60.598`). It uses NDWI, `lambda = 1`, and the default study period from 1 January 2023 to 1 January 2024. After cloud filtering, 20 observations were available. The estimated widths range from about 1,712 to 1,731 metres, with a mean of about 1,726 metres.
+
+![Estimated river-width time series for the Manacapuru example](examples/amazon_manacapuru_sentinel2/width_timeseries.png)
+
+The [example folder](examples/amazon_manacapuru_sentinel2) contains the width CSV, the time-series figure, the study-area map, and notes on how the run was made. This is an illustrative output from the workflow, not an independent accuracy assessment.
+
 ## Outputs
 
 Generated files are written to sensor-specific directories beside the scripts:
@@ -192,6 +200,7 @@ RiWEx_MODIS.py        MODIS/Global WaterPack workflow
 riwex_landsat.yml     Landsat Conda environment
 riwex_sentinel.yml    Sentinel-2 Conda environment
 riwex_modis.yml       MODIS Conda environment
+examples/              One compact, reproducible example output
 ```
 
 ## Data sources
