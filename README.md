@@ -28,8 +28,8 @@ The three workflows have separate Conda environment files because their geospati
 Clone the repository and enter its directory:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/riwex.git
-cd riwex
+git clone https://github.com/shirazi25/riwex-river-width-extraction.git
+cd riwex-river-width-extraction
 ```
 
 Create the environment for the sensor you want to use:
